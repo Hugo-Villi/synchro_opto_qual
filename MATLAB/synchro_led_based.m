@@ -4,13 +4,19 @@ file = uigetfile('*.xml');  %get the file name
 acq = btkReadAcquisition(regexprep(file,'xml','c3d'));  %read the .c3d
 analogic_entries=btkGetAnalogs(acq);    %get the values of analogic entries in a struct
 analogic_entries=analogic_entries.Channel_10;   %In the case of this algortihm the analogic
-
+markers_value=btkGetMarkersValues(acq);
+grf = btkGetGroundReactionWrenches(acq);
 %entries was setup to the entries #10, this would need to be changed if the entrie
 %is modified or applied in another setup
 analog_freq=btkGetAnalogFrequency(acq); %get the sample frequency of the analog channel
-blink_time=300; %this calue is coming from the Arduino code, where the settings
+point_freq=btkGetPointFrequency(acq); 
+Opto_freq=1000;
+blink_time=300; %this value is coming from the Arduino code, where the settings
 %are made so the led blink during 300ms
-blink_time_analog_frame=(blink_time*analog_freq)/1000;  %express the blink time in analog frames
+pause_time=200;  %from Arduino, 200ms
+num_square_wave=4;   %from Arduino
+blink_time_analog_frame=(blink_time*analog_freq)/Opto_freq;  %express the blink time in analog frames
+pause_time_analog_frame=(pause_time*analog_freq)/Opto_freq;
 i=1;    %initialize the variable for the while loop
 j=1;
 while i<size(analogic_entries,1)    %go througha all the vector to identify the frame were it goes from a low to high state
@@ -21,20 +27,17 @@ while i<size(analogic_entries,1)    %go througha all the vector to identify the 
     end
     i=i+1;
 end
-time_low=1;
+
+i=1;    %initialize the variable for the while loop
 j=1;
-for i=1:size(analogic_entries,1)    %detect the switch from high to low state
-    if analogic_entries(i,1)<0.1
-        time_low=time_low+1;
-    else
-        time_low=1;
+while i<size(analogic_entries,1)    %go througha all the vector to identify the frame were it goes from a low to high state
+    if analogic_entries(i,1)>0.1 && analogic_entries(i+1,1)<0.1  %will detect a switching from high to low state
+        down(j)=i;    %store the frame (analog) where it switches
+        j=j+1;  %increment for the storage
+        i=i+blink_time_analog_frame+50; %will jump directly after the blink phase
     end
-    if time_low==250
-        down(j)=i-249;
-        j=j+1;
-    end
+    i=i+1;
 end
-down(1)=[]
 
 %As the LED is blinking at 30000Hz (see arduino code), the rate of the
 %analog sampling is to low to catch every switch, it is not possible to use
@@ -51,11 +54,11 @@ for i=1:size(only_led,1)-1  %will look for gaps in the timestamps, if it is high
         j=j+1;  %increment for the storing array.
     end
 end
-start_led(4:end)=[];    %the pression on the button to end the acquisition trigger a new synchronisation sequence that can be enregistred at the end of the file
-end_led(4:end)=[];  %So only the first 3 values of the array are keeped
+start_led(num_square_wave+1:end)=[];    %the pression on the button to end the acquisition trigger a new synchronisation sequence that can be enregistred at the end of the file
+end_led(num_square_wave+1:end)=[];  %So only the first  values of the array are keeped
 
-up_in_opto_frame=up/(analog_freq/1000)  %the analog frame rate (2000) is reduced to the one of the optogait(1000)
-down_in_opto_frame=down/(analog_freq/1000)
+up_in_opto_frame=up/(analog_freq/Opto_freq)  %the analog frame rate (2000) is reduced to the one of the optogait(1000)
+down_in_opto_frame=down/(analog_freq/Opto_freq)
 delay_up=up_in_opto_frame-start_led     %compute the delay, will give a result in opto frames
 delay_down=down_in_opto_frame-end_led
 delay=cat(1,delay_down,delay_up)    %concatenate the up and down delays
@@ -96,24 +99,25 @@ only_numerical=corrected_only_numerical;
 %[plot_grf,frames_of_impact_grf,last_frame_grf]=detect_impact_forceplate(acq,treshold_forceplate_impact,treshold_time);    %this function will output a plot to make sure the correct data is extracted, the moments of impact, and size of the recording
 number_of_leds=286;    %the number of bars in the set up
 threshold_leds=2;
+only_numerical=delete_object_artefact(only_numerical);
 only_numerical=delete_false_edges(only_numerical,threshold_leds,number_of_leds);
-
 %After the deletion of false objects, a second treatment occurs. The maximal
 %number of edge the optogait could record for a patient with hollow foot is
 %ten. Hence any row with more than ten edge is considered as an error and
 %is deleted.
-only_numerical=delete_object_artefact(only_numerical);
+
 
 %An effect of the qualisys on the optogait is the blinking of leds between a
 %TRUE/FALSE state. To delete these unnecessary rows, the function check if
 %two line are the same. If yes, the row is deleted.
-only_numerical=delete_blinking(only_numerical);
+
+%only_numerical=delete_blinking(only_numerical);
 
 %Another similar effect can occur, but instead of blinking between
 %TRUE/FALSE states its blink between two different states with different
 %number of edges. To delete this effect pairs of row are compared, and if
 %similarities are found the pair is deleted.
-only_numerical=delete_pairs(only_numerical);
+%only_numerical=delete_pairs(only_numerical);
 
 %Once the data have been cleaned, a continuous file is recreated, to ease
 %the future synchronisation and the deletion of the remaining errors.
@@ -127,10 +131,10 @@ continuous=create_continuous(only_numerical);
 number_of_edges=get_number_edges(continuous);
 
 %detecting the changement of edges
-change_of_edges=change_edges(number_of_edges);
+indexes_of_change_of_edges=change_edges(number_of_edges);
 
 %detecting the short changes
-short_change=short_changes(change_of_edges,1);
+short_change=short_changes(indexes_of_change_of_edges,1);
 
 %for singles lines, the values of the previous row is copied
 continuous=delete_single_lines(short_change,continuous);
@@ -138,26 +142,26 @@ continuous=delete_single_lines(short_change,continuous);
 %Once the single line have been deleted the number of changes is computed
 %again to ease the next steps
 number_of_edges=get_number_edges(continuous);
-change_of_edges=[];
-change_of_edges=change_edges(number_of_edges);
+indexes_of_change_of_edges=[];
+indexes_of_change_of_edges=change_edges(number_of_edges);
 short_change=[];
-short_change=short_changes(change_of_edges,1);
+short_change=short_changes(indexes_of_change_of_edges,1);
 
 continuous = delete_case_1(continuous,short_change,number_of_edges);
 continuous = delete_case_2(continuous,short_change,number_of_edges);
 
 number_of_edges=get_number_edges(continuous);
-change_of_edges=[];
-change_of_edges=change_edges(number_of_edges);
+indexes_of_change_of_edges=[];
+indexes_of_change_of_edges=change_edges(number_of_edges);
 short_change=[];
-short_change=short_changes(change_of_edges,1);
+short_change=short_changes(indexes_of_change_of_edges,1);
 continuous=delete_single_lines(short_change,continuous);
 
 number_of_edges=get_number_edges(continuous);
-change_of_edges=[];
-change_of_edges=change_edges(number_of_edges);
+indexes_of_change_of_edges=[];
+indexes_of_change_of_edges=change_edges(number_of_edges);
 short_change=[];
-short_change=short_changes(change_of_edges,1);
+short_change=short_changes(indexes_of_change_of_edges,1);
 continuous=delete_single_lines(short_change,continuous);
 
 %tests to plot the needed information
@@ -171,3 +175,19 @@ continous_number_of_edges_to_plot=get_number_edges(continuous);
 all_led_info=get_all_led_info(data_to_plot,number_of_edges_to_plot);
 continuous_all_led_info=get_all_led_info(continuous,continous_number_of_edges_to_plot);
 plot_optogait=plot_opto(all_led_info,data_to_plot,number_of_leds);
+j=1;
+for i=1:5:size(continuous_all_led_info,1)
+    continuous_all_led_info_to_c3d(j,:)=continuous_all_led_info(i,:);
+    j=j+1;
+end
+
+
+for i=1:size(continuous_all_led_info_to_c3d,2)
+    clear values
+    values(1:size(continuous_all_led_info_to_c3d,1),1)=2016-(i*10.4);
+    values(1:size(continuous_all_led_info_to_c3d,1),2)=239.5;
+    values(1:size(continuous_all_led_info_to_c3d,1),3)=continuous_all_led_info_to_c3d(:,i)*100;
+    values(size(markers_value,1)+1:end,:)=[];
+    [points, pointsInfo] = btkAppendPoint(acq, 'marker', ['opto_',num2str(i)], values);
+end
+btkWriteAcquisition(acq, 'test01.c3d');
