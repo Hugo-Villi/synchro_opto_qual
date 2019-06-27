@@ -70,7 +70,8 @@ for i=1:size(row_to_keep)
     corrected_only_numerical(row_to_keep(i),col_to_keep(i))=corrected_only_numerical(row_to_keep(i),col_to_keep(i)+1);  %delete all the rows used for synchronisation to ease the next steps
     corrected_only_numerical(row_to_keep(i),col_to_keep(i)+1)=0;
 end
-[row288,col288]=find(corrected_only_numerical==288)
+[row288,col288]=find(corrected_only_numerical(:,2:end)==288)
+col288=col288+1;
 j=1;
 row_to_del=[]
 for i=1:size(row288)
@@ -190,4 +191,4 @@ for i=1:size(continuous_all_led_info_to_c3d,2)
     values(size(markers_value,1)+1:end,:)=[];
     [points, pointsInfo] = btkAppendPoint(acq, 'marker', ['opto_',num2str(i)], values);
 end
-btkWriteAcquisition(acq, 'test01.c3d');
+btkWriteAcquisition(acq, strcat(regexprep(file,'.xml',''),'_mod.c3d'));
